@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  PLANNER
+  OWNER
+  ADMIN
+}
+
+enum ListingCategory {
+  VENUE
+  CATERING
+  PHOTOGRAPHY
+  DECOR
+  ENTERTAINMENT
+}
+
+enum PricingUnit {
+  PER_EVENT
+  PER_HEAD
+  PER_DAY
+}
+
+enum AvailabilityStatus {
+  AVAILABLE
+  BOOKED
+  BLOCKED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  CANCELLED
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  fullName  String
+  phone     String?
+  role      UserRole  @default(PLANNER)
+  avatarUrl String?
+  createdAt DateTime  @default(now())
+
+  listings  Listing[] @relation("OwnerListings")
+  bookings  Booking[] @relation("PlannerBookings")
+  reviews   Review[]  @relation("PlannerReviews")
+}
+
+model Listing {
+  id            String             @id @default(uuid())
+  ownerId       String
+  owner         User               @relation("OwnerListings", fields: [ownerId], references: [id], onDelete: Cascade)
+  slug          String             @unique
+  title         String
+  description   String
+  category      ListingCategory    @default(VENUE)
+  eventTypes    String[]
+  city          String
+  address       String
+  latitude      Float?
+  longitude     Float?
+  basePrice     Int
+  pricingUnit   PricingUnit        @default(PER_EVENT)
+  minCapacity   Int                @default(10)
+  maxCapacity   Int
+  isVerified    Boolean            @default(false)
+  amenities     String[]
+  coverImage    String
+  galleryImages String[]
+  contactEmail  String?
+  contactPhone  String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  packages      ListingPackage[]
+  availability  AvailabilitySlot[]
+  bookings      Booking[]
+  reviews       Review[]
+
+  @@index([city, category, basePrice])
+  @@index([isVerified])
+}
+
+model ListingPackage {
+  id            String    @id @default(uuid())
+  listingId     String
+  listing       Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  name          String
+  description   String
+  price         Int
+  includedItems String[]
+
+  bookings      Booking[]
+}
+
+model AvailabilitySlot {
+  id        String             @id @default(uuid())
+  listingId String
+  listing   Listing            @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  date      DateTime           @db.Date
+  status    AvailabilityStatus @default(AVAILABLE)
+  bookingId String?            @unique
+  booking   Booking?           @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  note      String?
+
+  @@unique([listingId, date])
+}
+
+model Booking {
+  id                String            @id @default(uuid())
+  bookingCode       String            @unique
+  listingId         String
+  listing           Listing           @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  plannerId         String
+  planner           User              @relation("PlannerBookings", fields: [plannerId], references: [id], onDelete: Cascade)
+  packageId         String?
+  package           ListingPackage?   @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  eventDate         DateTime          @db.Date
+  eventType         String
+  guestCount        Int
+  totalAmount       Int
+  status            BookingStatus     @default(PENDING)
+  plannerNotes      String?
+  ownerResponseNote String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  availabilitySlot  AvailabilitySlot?
+  review            Review?
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  plannerId String
+  planner   User     @relation("PlannerReviews", fields: [plannerId], references: [id], onDelete: Cascade)
+  bookingId String   @unique
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  rating    Int
+  comment   String
+  createdAt DateTime @default(now())
+}

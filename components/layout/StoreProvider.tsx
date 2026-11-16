@@ -12,6 +12,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             staleTime: 60 * 1000,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
           },
         },
       })

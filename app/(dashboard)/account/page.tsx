@@ -95,9 +95,9 @@ export default function MyAccountPage() {
               My Account · <i>{displayName}</i>
             </h1>
             {displayEmail && (
-              <p className="text-sm text-[var(--muted)] mt-2">
+              <p className="text-sm text-(--muted) mt-2">
                 {displayEmail} · Active role:{" "}
-                <strong className="text-[var(--ink)]">
+                <strong className="text-(--ink)">
                   {ROLE_LABELS[currentRole]}
                 </strong>
               </p>
@@ -197,7 +197,7 @@ export default function MyAccountPage() {
                   </div>
                   <div>
                     <h3 className="text-2xl leading-tight">{card.title}</h3>
-                    <p className="text-xs text-[var(--muted)] mt-1.5 leading-relaxed">
+                    <p className="text-xs text-(--muted) mt-1.5 leading-relaxed">
                       {card.desc}
                     </p>
                   </div>

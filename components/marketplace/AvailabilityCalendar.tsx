@@ -42,12 +42,12 @@ export function AvailabilityCalendar({
         </div>
         <div className="flex items-center gap-5 text-xs">
           <span className="inline-flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-[var(--ink)]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-600" />
             <span>Open</span>
           </span>
-          <span className="inline-flex items-center gap-2 text-[var(--muted)]">
-            <span className="h-2 w-2 border border-[var(--muted)]" />
-            <span>Booked / Held</span>
+          <span className="inline-flex items-center gap-2 text-red-600 font-medium">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-600" />
+            <span>Booked</span>
           </span>
         </div>
       </div>
@@ -68,38 +68,47 @@ export function AvailabilityCalendar({
         {DECEMBER_2026_DAYS.map(({ day, dateStr }) => {
           const slot = getSlotStatus(dateStr);
           const isAvailable = slot.status === "available";
-          const isSelected = selectedDate === dateStr;
+          const isBooked = slot.status === "booked";
+          const isSelected = selectedDate === dateStr && isAvailable;
 
           return (
             <button
               key={dateStr}
               type="button"
               disabled={!isAvailable}
-              onClick={() => onSelectDate(dateStr)}
+              onClick={() => isAvailable && onSelectDate(dateStr)}
               title={
-                slot.note
-                  ? `${dateStr}: ${slot.note}`
-                  : `${dateStr} (${slot.status})`
+                !isAvailable
+                  ? `${dateStr}: Already ${isBooked ? "Booked" : "Blocked"}`
+                  : `${dateStr} (Available)`
               }
               className={`h-12 flex flex-col items-center justify-center border text-xs transition-colors ${
                 isSelected
                   ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg)] font-medium"
                   : isAvailable
                   ? "border-[var(--line)] bg-[var(--bg)] text-[var(--ink)] hover:bg-[var(--soft)] cursor-pointer"
-                  : "border-[var(--line)] bg-[var(--soft)] text-[var(--muted)] line-through opacity-55 cursor-not-allowed"
+                  : "border-red-300 bg-red-500/10 text-red-600 cursor-not-allowed"
               }`}
             >
-              <span>{day}</span>
+              <span className={!isAvailable ? "line-through font-medium" : ""}>
+                {day}
+              </span>
               <span
-                className={`text-[9px] uppercase tracking-wider ${
+                className={`text-[9px] uppercase tracking-wider font-semibold ${
                   isSelected
                     ? "text-[var(--bg)]"
                     : isAvailable
-                    ? "text-[var(--muted)]"
-                    : "text-[var(--muted)]"
+                    ? "text-emerald-600"
+                    : "text-red-600"
                 }`}
               >
-                {isSelected ? "Chosen" : isAvailable ? "Open" : "Taken"}
+                {isSelected
+                  ? "Chosen"
+                  : isAvailable
+                  ? "Open"
+                  : isBooked
+                  ? "Booked"
+                  : "Blocked"}
               </span>
             </button>
           );

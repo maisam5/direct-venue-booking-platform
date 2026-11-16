@@ -69,8 +69,26 @@ export default function CreateListingModal() {
   const [price, setPrice] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const wasOpenRef = React.useRef(false);
+  const loadedEditingIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      loadedEditingIdRef.current = null;
+      return;
+    }
+
+    const currentEditingId = editingListing?.id ?? null;
+    const justOpened = !wasOpenRef.current;
+    const editingTargetChanged = currentEditingId !== loadedEditingIdRef.current;
+
+    if (!justOpened && !editingTargetChanged) {
+      return;
+    }
+
+    wasOpenRef.current = true;
+    loadedEditingIdRef.current = currentEditingId;
 
     if (editingListing) {
       setStep(STEPS.CATEGORY);
@@ -138,10 +156,22 @@ export default function CreateListingModal() {
       } else {
         setKindFilter("all");
       }
-      setContactEmail(user?.primaryEmailAddress?.emailAddress || "");
-      setContactPhone(user?.primaryPhoneNumber?.phoneNumber || "");
+      setContactEmail((prev) => prev || user?.primaryEmailAddress?.emailAddress || "");
+      setContactPhone((prev) => prev || user?.primaryPhoneNumber?.phoneNumber || "");
     }
-  }, [isOpen, editingListing, defaultKind, currentRole, user]);
+  }, [isOpen, editingListing, defaultKind, currentRole, user, getByValue]);
+
+  useEffect(() => {
+    if (!isOpen || editingListing) return;
+    const defaultEmail = user?.primaryEmailAddress?.emailAddress;
+    const defaultPhone = user?.primaryPhoneNumber?.phoneNumber;
+    if (defaultEmail) {
+      setContactEmail((prev) => prev || defaultEmail);
+    }
+    if (defaultPhone) {
+      setContactPhone((prev) => prev || defaultPhone);
+    }
+  }, [isOpen, editingListing, user]);
 
   const selectedCategoryObj = getCategoryBySlug(category);
   const isVendorCategory = selectedCategoryObj?.kind === "vendor";
@@ -205,18 +235,6 @@ export default function CreateListingModal() {
       file,
     }));
     setPhotos((prev) => [...prev, ...newItems]);
-  };
-
-  const handleAddPresetUrl = (url: string) => {
-    if (photos.length >= 5) {
-      toast("Maximum 5 photos allowed per listing.");
-      return;
-    }
-    if (photos.some((p) => p.preview === url)) return;
-    setPhotos((prev) => [
-      ...prev,
-      { id: `preset-${Date.now()}-${Math.random()}`, preview: url },
-    ]);
   };
 
   const handleRemovePhoto = (id: string) => {
@@ -631,7 +649,6 @@ export default function CreateListingModal() {
           <ImageUpload
             photos={photos}
             onAddFiles={handleAddFiles}
-            onAddPresetUrl={handleAddPresetUrl}
             onRemovePhoto={handleRemovePhoto}
             minPhotos={3}
             maxPhotos={5}

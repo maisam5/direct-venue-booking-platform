@@ -12,39 +12,14 @@ export interface GalleryPhotoItem {
 interface ImageUploadProps {
   photos: GalleryPhotoItem[];
   onAddFiles: (files: FileList) => void;
-  onAddPresetUrl: (url: string) => void;
   onRemovePhoto: (id: string) => void;
   minPhotos?: number;
   maxPhotos?: number;
 }
 
-const PRESET_GALLERY = [
-  {
-    label: "Harbor Daylight Hall",
-    url: "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=1200&q=85",
-  },
-  {
-    label: "Glasshouse Conservatory",
-    url: "https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&w=1200&q=85",
-  },
-  {
-    label: "Industrial Brick Loft",
-    url: "https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&w=1200&q=85",
-  },
-  {
-    label: "Culinary & Banquet Table",
-    url: "https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&w=1200&q=85",
-  },
-  {
-    label: "Editorial Floral Table",
-    url: "https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1200&q=85",
-  },
-];
-
 export default function ImageUpload({
   photos,
   onAddFiles,
-  onAddPresetUrl,
   onRemovePhoto,
   minPhotos = 3,
   maxPhotos = 5,
@@ -137,42 +112,6 @@ export default function ImageUpload({
               </button>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Architectural Sample Presets */}
-      {!isFull && (
-        <div className="space-y-2 text-left">
-          <span className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">
-            Quick-add verified sample photos (click to add):
-          </span>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {PRESET_GALLERY.map((item) => {
-              const alreadyAdded = photos.some((p) => p.preview === item.url);
-              return (
-                <button
-                  key={item.url}
-                  type="button"
-                  disabled={alreadyAdded || isFull}
-                  onClick={() => onAddPresetUrl(item.url)}
-                  className={`relative rounded-lg overflow-hidden border-2 h-14 group cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
-                    alreadyAdded
-                      ? "border-[var(--ink)]"
-                      : "border-transparent hover:border-[var(--line)]"
-                  }`}
-                >
-                  <img
-                    src={item.url}
-                    alt={item.label}
-                    className="w-full h-full object-cover group-hover:scale-105 transition"
-                  />
-                  <span className="absolute inset-x-0 bottom-0 bg-black/70 text-white text-[9px] px-1 py-0.5 truncate">
-                    {alreadyAdded ? "Added ✓" : item.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
         </div>
       )}
     </div>

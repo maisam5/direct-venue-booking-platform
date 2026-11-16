@@ -2,23 +2,35 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useBookings } from "@/hooks/queries";
 import { useCreateListingModal } from "@/store/useCreateListingModal";
 import { useClerkAuthFlow } from "@/hooks/useClerkAuthFlow";
 import { isHostRole } from "@/lib/roles";
+import {
+  executePendingBookingOnce,
+  peekPendingBooking,
+} from "@/lib/pending-booking";
+import { toast } from "@/lib/toast";
 import { MobileNav } from "./MobileNav";
 import { MyAccountDropdown } from "./MyAccountDropdown";
 import { Moon, Plus, Sun } from "lucide-react";
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const isHome = pathname === "/";
-  const { data: bookings = [] } = useBookings();
-  const { isSignedIn, currentRole, startGoogleAuth } = useClerkAuthFlow();
+  const { user, isLoaded, isSignedIn, currentRole, startGoogleAuth } =
+    useClerkAuthFlow();
   const { open: openCreateListing } = useCreateListingModal();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [mounted, setMounted] = useState(false);
+  const { data: bookings = [] } = useBookings(
+    undefined,
+    Boolean(mounted && isSignedIn && !isHostRole(currentRole))
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -27,6 +39,56 @@ export function Navbar() {
       setTheme(current);
     }
   }, []);
+
+  // Global fallback: if Clerk redirected to "/" or "/account" after sign-in while a pending booking exists
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    if (
+      pathname.startsWith("/onboarding") ||
+      pathname.startsWith("/sso-callback")
+    ) {
+      return;
+    }
+
+    if (!peekPendingBooking()) return;
+
+    async function processPendingBooking() {
+      const result = await executePendingBookingOnce({
+        fullName: user?.fullName,
+        firstName: user?.firstName,
+        email: user?.primaryEmailAddress?.emailAddress,
+        phone: user?.primaryPhoneNumber?.phoneNumber,
+      });
+
+      if (!result.executed || !result.pending) return;
+
+      if (result.success && result.booking) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["bookings"] }),
+          queryClient.invalidateQueries({ queryKey: ["listings"] }),
+          queryClient.invalidateQueries({
+            queryKey: ["availability", result.pending.listingId],
+          }),
+        ]);
+        const code = result.booking.bookingCode || result.booking.id;
+        toast(
+          `Booking #${code} confirmed for ${result.pending.listingName}!`
+        );
+        router.push(
+          `/listings/${result.pending.listingSlug}?booked=${encodeURIComponent(
+            code
+          )}`
+        );
+      } else {
+        toast(
+          result.error || "Could not complete booking for the selected date."
+        );
+        router.push(`/listings/${result.pending.listingSlug}`);
+      }
+    }
+
+    processPendingBooking();
+  }, [isLoaded, isSignedIn, pathname, user, queryClient, router]);
 
   if (pathname.startsWith("/admin")) {
     return null;

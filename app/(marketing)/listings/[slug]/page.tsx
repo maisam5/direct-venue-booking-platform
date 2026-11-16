@@ -3,6 +3,7 @@
 import React, { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { ChevronLeft, ChevronRight, Maximize2 } from "lucide-react";
 import { useAppDispatch, useAppSelector } from "@/store";
 import {
   hydrateDraftWithListing,
@@ -205,73 +206,127 @@ function ListingDetailContent() {
             </div>
           </div>
 
-          <div className="lg:col-span-5">
-            <figure
-              className="art cursor-pointer group"
-              onClick={() => setLightboxOpen(true)}
-            >
-              {activePhotoUrl && (
-                <img
-                  src={activePhotoUrl}
-                  alt={listing.name}
-                  className="absolute inset-0 h-full w-full object-cover opacity-40 transition-opacity duration-500 group-hover:opacity-60"
-                />
-              )}
-              <div className="arch overflow-hidden">
-                {activePhotoUrl && (
+          <div className="lg:col-span-5 space-y-3">
+            <div className="relative h-[360px] sm:h-[430px] w-full overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--soft)] group select-none flex items-center justify-center">
+              {activePhotoUrl ? (
+                <>
+                  {/* Soft ambient backdrop so any aspect ratio looks full without cropping */}
                   <img
                     src={activePhotoUrl}
-                    alt={listing.name}
-                    className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 h-full w-full object-cover blur-xl opacity-30 scale-110 pointer-events-none"
                   />
-                )}
-              </div>
-              <figcaption>
-                {listing.galleryCaptions[activePhotoIndex]?.title ??
-                  listing.name}{" "}
-                · Click to enlarge
-              </figcaption>
-            </figure>
-          </div>
-        </div>
-
-        {/* Interactive Architectural Study Strip */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 py-8 border-b border-[var(--line)]">
-          {listing.galleryCaptions.map((frame, i) => {
-            const thumbUrl = photos[i % photos.length];
-            const isActive = activePhotoIndex === i;
-            return (
-              <button
-                key={frame.title}
-                type="button"
-                onClick={() => setActivePhotoIndex(i % photos.length)}
-                className={`text-left border p-4 flex items-center gap-4 transition-colors cursor-pointer ${
-                  isActive
-                    ? "border-[var(--ink)] bg-[var(--soft)]"
-                    : "border-[var(--line)] bg-[var(--bg)] hover:bg-[var(--soft)]"
-                }`}
-              >
-                {thumbUrl && (
                   <img
-                    src={thumbUrl}
-                    alt={frame.title}
-                    className="h-16 w-20 object-cover border border-[var(--line)] shrink-0"
+                    src={activePhotoUrl}
+                    alt={`${listing.name} — Photo ${activePhotoIndex + 1}`}
+                    onClick={() => setLightboxOpen(true)}
+                    className="relative z-10 max-h-full max-w-full h-full w-full object-contain cursor-pointer transition-transform duration-300"
                   />
-                )}
-                <div>
-                  <span className="label">
-                    Study 0{i + 1} · {frame.aspect}
-                  </span>
-                  <h3 className="text-2xl leading-tight mt-0.5">
-                    {frame.title}
-                  </h3>
-                  <p className="text-xs text-[var(--muted)] mt-0.5">
-                    {frame.note}
-                  </p>
+                </>
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-xs text-[var(--muted)]">
+                  No photos available
                 </div>
-              </button>
-            );
-          })}
+              )}
+
+              {/* Top badges: counter + fullscreen */}
+              {photos.length > 0 && (
+                <div className="absolute top-3 inset-x-3 z-20 flex items-center justify-between pointer-events-none">
+                  <span className="bg-black/75 text-white text-xs font-medium px-3 py-1 rounded-full">
+                    {activePhotoIndex + 1} / {photos.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxOpen(true)}
+                    aria-label="View fullscreen"
+                    className="pointer-events-auto h-8 w-8 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-black transition cursor-pointer"
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Left / Right Slider Controls */}
+              {photos.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Previous photo"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActivePhotoIndex(
+                        (prev) => (prev - 1 + photos.length) % photos.length
+                      );
+                    }}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-black transition shadow-md cursor-pointer"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Next photo"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActivePhotoIndex((prev) => (prev + 1) % photos.length);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 z-20 h-10 w-10 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-black transition shadow-md cursor-pointer"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+                </>
+              )}
+
+              {/* Bottom Dot Indicators */}
+              {photos.length > 1 && (
+                <div className="absolute bottom-3 inset-x-0 z-20 flex items-center justify-center gap-1.5">
+                  {photos.map((_, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      aria-label={`Go to photo ${idx + 1}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActivePhotoIndex(idx);
+                      }}
+                      className={`h-2 rounded-full transition-all cursor-pointer ${
+                        activePhotoIndex === idx
+                          ? "w-6 bg-white shadow"
+                          : "w-2 bg-white/60 hover:bg-white/90"
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Thumbnail Strip */}
+            {photos.length > 1 && (
+              <div className="grid grid-cols-5 gap-2">
+                {photos.map((url, idx) => {
+                  const isActive = activePhotoIndex === idx;
+                  return (
+                    <button
+                      key={`${url}-${idx}`}
+                      type="button"
+                      onClick={() => setActivePhotoIndex(idx)}
+                      className={`relative h-16 sm:h-20 rounded-lg overflow-hidden border-2 bg-[var(--soft)] transition cursor-pointer ${
+                        isActive
+                          ? "border-[var(--ink)] ring-1 ring-[var(--ink)]"
+                          : "border-[var(--line)] opacity-75 hover:opacity-100"
+                      }`}
+                    >
+                      <img
+                        src={url}
+                        alt={`${listing.name} thumbnail ${idx + 1}`}
+                        className="h-full w-full object-contain bg-[var(--soft)]"
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Main 2-Column Split: Packages, Calendar & Reviews (Left) + Direct Booking Widget (Right) */}
@@ -466,7 +521,7 @@ function ListingDetailContent() {
             <img
               src={activePhotoUrl}
               alt={listing.name}
-              className="w-full max-h-[70vh] object-cover border border-[var(--line)]"
+              className="w-full max-h-[75vh] object-contain bg-[var(--soft)] border border-[var(--line)]"
             />
             <div className="flex items-center justify-between">
               <button

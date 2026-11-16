@@ -75,13 +75,32 @@ const bookingDraftSlice = createSlice({
       const pkg = listing.packages[0];
       state.selectedPackageId = pkg ? pkg.id : "";
       state.selectedAddOnIds = [];
+      if (listing.categories && listing.categories.length > 0) {
+        state.eventCategory = listing.categories[0];
+      }
       const firstOpen = listing.availability.find(
         (slot) => slot.status === "available"
       );
       if (firstOpen) {
         state.eventDate = firstOpen.date;
+      } else {
+        const unavailableDates = new Set(
+          listing.availability
+            .filter((s) => s.status === "booked" || s.status === "blocked")
+            .map((s) => s.date)
+        );
+        for (let day = 14; day <= 31; day++) {
+          const candidate = `2026-12-${String(day).padStart(2, "0")}`;
+          if (!unavailableDates.has(candidate)) {
+            state.eventDate = candidate;
+            break;
+          }
+        }
       }
-      state.guestCount = Math.min(state.guestCount, listing.maxGuests);
+      state.guestCount = Math.max(
+        1,
+        Math.min(state.guestCount, listing.maxGuests || 150)
+      );
       const totals = computeTotals(
         listing,
         state.selectedPackageId,

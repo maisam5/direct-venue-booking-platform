@@ -65,7 +65,7 @@ function OwnerPortalContent() {
           <h1 className="text-4xl leading-tight">
             Register as a Venue Owner or Vendor
           </h1>
-          <p className="text-sm text-[var(--muted)]">
+          <p className="text-sm text-(--muted)">
             Your account is currently an Event Planner. Upgrade to a Venue Owner
             or Service Vendor to publish listings, manage live calendars, and
             accept direct bookings.
@@ -226,42 +226,73 @@ function OwnerPortalContent() {
                 </div>
 
                 <div className="lg:col-span-2 flex flex-wrap lg:justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      statusMutation.mutate({
-                        bookingId: req.id,
-                        newStatus: "CONFIRMED",
-                        ownerResponseNote:
-                          "Confirmed directly by owner. Calendar date locked.",
-                      })
-                    }
-                    className={`btn !py-2 !px-3 text-xs ${
-                      req.dbStatus === "CONFIRMED" || req.status === "Confirmed"
-                        ? "btn-filled"
-                        : ""
-                    }`}
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      statusMutation.mutate({
-                        bookingId: req.id,
-                        newStatus: "DECLINED",
-                        ownerResponseNote:
-                          "Declined by owner. Calendar date released.",
-                      })
-                    }
-                    className={`btn !py-2 !px-3 text-xs ${
-                      req.dbStatus === "DECLINED" || req.status === "Declined"
-                        ? "btn-filled"
-                        : ""
-                    }`}
-                  >
-                    Decline
-                  </button>
+                  {(() => {
+                    const isConfirmed =
+                      req.dbStatus === "CONFIRMED" ||
+                      req.status === "Confirmed";
+                    const isDeclined =
+                      req.dbStatus === "DECLINED" || req.status === "Declined";
+                    const isCancelled =
+                      req.dbStatus === "CANCELLED" ||
+                      req.status === "Cancelled";
+                    const isMutatingThis =
+                      statusMutation.isPending &&
+                      statusMutation.variables?.bookingId === req.id;
+
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          disabled={
+                            isConfirmed || isCancelled || isMutatingThis
+                          }
+                          onClick={() =>
+                            statusMutation.mutate({
+                              bookingId: req.id,
+                              newStatus: "CONFIRMED",
+                              ownerResponseNote:
+                                "Confirmed directly by owner. Calendar date locked.",
+                            })
+                          }
+                          className={`btn !py-2 !px-3 text-xs disabled:opacity-60 disabled:cursor-not-allowed ${
+                            isConfirmed ? "btn-filled" : ""
+                          }`}
+                        >
+                          {isConfirmed
+                            ? "Confirmed"
+                            : isMutatingThis &&
+                              statusMutation.variables?.newStatus ===
+                                "CONFIRMED"
+                            ? "Confirming..."
+                            : "Confirm"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={
+                            isDeclined || isCancelled || isMutatingThis
+                          }
+                          onClick={() =>
+                            statusMutation.mutate({
+                              bookingId: req.id,
+                              newStatus: "DECLINED",
+                              ownerResponseNote:
+                                "Declined by owner. Calendar date released.",
+                            })
+                          }
+                          className={`btn !py-2 !px-3 text-xs disabled:opacity-60 disabled:cursor-not-allowed ${
+                            isDeclined ? "btn-filled" : ""
+                          }`}
+                        >
+                          {isDeclined
+                            ? "Declined"
+                            : isMutatingThis &&
+                              statusMutation.variables?.newStatus === "DECLINED"
+                            ? "Declining..."
+                            : "Decline"}
+                        </button>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             ))}

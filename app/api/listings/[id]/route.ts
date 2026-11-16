@@ -7,7 +7,7 @@ import { AuthError, requireHost, errorMessage } from "@/lib/auth";
 import { mapPrismaListingToUi } from "@/lib/format";
 
 async function fileToDataUrl(file: File): Promise<string | null> {
-  if (!file || file.size === 0 || file.size > 3 * 1024 * 1024) return null;
+  if (!file || file.size === 0 || file.size > 15 * 1024 * 1024) return null;
   const arrayBuffer = await file.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString("base64");
   const mimeType = file.type || "image/jpeg";

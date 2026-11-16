@@ -18,8 +18,8 @@ export function useListingAvailability(
     enabled: Boolean(listingId),
     initialData,
     placeholderData: initialData,
-    staleTime: 15_000,
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 

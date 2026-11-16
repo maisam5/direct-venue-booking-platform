@@ -89,123 +89,144 @@ export async function createDirectBooking(
   }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      // 1. Verify listing + owner + packages
-      const listing = await tx.listing.findUnique({
+    // Fetch listing & update planner contact info outside the short interactive transaction
+    const [listing, planner] = await Promise.all([
+      prisma.listing.findUnique({
         where: { id: values.listingId },
         include: {
           owner: true,
           packages: true,
         },
-      });
-
-      if (!listing) {
-        throw new Error("Selected venue or vendor listing no longer exists.");
-      }
-
-      // 2. Concurrency-safe check on AvailabilitySlot for (listingId, eventDate)
-      const existingSlot = await tx.availabilitySlot.findUnique({
-        where: {
-          listingId_date: {
-            listingId: listing.id,
-            date: eventDateObj,
-          },
-        },
-      });
-
-      if (
-        existingSlot &&
-        (existingSlot.status === "BOOKED" || existingSlot.status === "BLOCKED")
-      ) {
-        throw new Error("This date was just reserved or blocked by the owner");
-      }
-
-      // 3. Update authenticated planner's contact info
-      const planner = await tx.user.update({
+      }),
+      prisma.user.update({
         where: { id: session.dbUserId },
         data: {
           fullName: values.plannerName || session.fullName,
           phone: values.plannerPhone,
         },
-      });
+      }),
+    ]);
 
-      // 4. Calculate direct total (0% broker fee)
-      const selectedPkg =
-        listing.packages.find((p) => p.id === values.packageId) ??
-        listing.packages[0] ??
-        null;
+    if (!listing) {
+      return {
+        success: false,
+        error: "Selected venue or vendor listing no longer exists.",
+      };
+    }
 
-      const baseAmount = selectedPkg
-        ? listing.pricingUnit === "PER_HEAD"
-          ? selectedPkg.price * values.guestCount
-          : selectedPkg.price
-        : listing.basePrice;
+    const selectedPkg =
+      listing.packages.find((p) => p.id === values.packageId) ??
+      listing.packages[0] ??
+      null;
 
-      const totalAmount =
-        typeof rawInput.calculatedTotal === "number" &&
-        rawInput.calculatedTotal >= baseAmount
-          ? rawInput.calculatedTotal
-          : baseAmount;
+    const baseAmount = selectedPkg
+      ? listing.pricingUnit === "PER_HEAD"
+        ? selectedPkg.price * values.guestCount
+        : selectedPkg.price
+      : listing.basePrice;
 
-      const bookingCode = `MGE-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const totalAmount =
+      typeof rawInput.calculatedTotal === "number" &&
+      rawInput.calculatedTotal >= baseAmount
+        ? rawInput.calculatedTotal
+        : baseAmount;
 
-      // 5. Create Booking record linked to authenticated planner
-      const createdBooking = await tx.booking.create({
-        data: {
-          bookingCode,
-          listingId: listing.id,
-          plannerId: planner.id,
-          packageId: selectedPkg ? selectedPkg.id : null,
-          eventDate: eventDateObj,
-          eventType: values.eventCategory.toUpperCase(),
-          guestCount: values.guestCount,
-          totalAmount,
-          status: "PENDING",
-          plannerNotes:
-            values.notes ||
-            `Direct booking request sent to ${listing.owner.fullName}.`,
-        },
-        include: {
-          listing: {
-            select: { id: true, slug: true, title: true, city: true },
+    const bookingCode = `MGE-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const result = await prisma.$transaction(
+      async (tx) => {
+        // 1. Concurrency-safe check on AvailabilitySlot & Booking for (listingId, eventDate)
+        const [existingSlot, existingActiveBooking] = await Promise.all([
+          tx.availabilitySlot.findUnique({
+            where: {
+              listingId_date: {
+                listingId: listing.id,
+                date: eventDateObj,
+              },
+            },
+          }),
+          tx.booking.findFirst({
+            where: {
+              listingId: listing.id,
+              eventDate: eventDateObj,
+              status: { in: ["PENDING", "CONFIRMED"] },
+            },
+            select: { id: true, status: true },
+          }),
+        ]);
+
+        if (
+          existingActiveBooking ||
+          (existingSlot &&
+            (existingSlot.status === "BOOKED" ||
+              existingSlot.status === "BLOCKED"))
+        ) {
+          throw new Error(
+            existingSlot?.status === "BLOCKED"
+              ? `Date ${values.eventDate} is blocked by the owner. Please select another open date.`
+              : `Date ${values.eventDate} is already booked by another user. Please select another available date.`
+          );
+        }
+
+        // 2. Create Booking record linked to authenticated planner
+        const createdBooking = await tx.booking.create({
+          data: {
+            bookingCode,
+            listingId: listing.id,
+            plannerId: planner.id,
+            packageId: selectedPkg ? selectedPkg.id : null,
+            eventDate: eventDateObj,
+            eventType: values.eventCategory.toUpperCase(),
+            guestCount: values.guestCount,
+            totalAmount,
+            status: "PENDING",
+            plannerNotes:
+              values.notes ||
+              `Direct booking request sent to ${listing.owner.fullName}.`,
           },
-          planner: {
-            select: { id: true, fullName: true, email: true, phone: true },
+          include: {
+            listing: {
+              select: { id: true, slug: true, title: true, city: true },
+            },
+            planner: {
+              select: { id: true, fullName: true, email: true, phone: true },
+            },
+            package: {
+              select: { id: true, name: true, price: true },
+            },
           },
-          package: {
-            select: { id: true, name: true, price: true },
-          },
-        },
-      });
+        });
 
-      // 6. Atomically upsert AvailabilitySlot to BOOKED linked to bookingId
-      await tx.availabilitySlot.upsert({
-        where: {
-          listingId_date: {
+        // 3. Atomically upsert AvailabilitySlot to BOOKED linked to bookingId
+        await tx.availabilitySlot.upsert({
+          where: {
+            listingId_date: {
+              listingId: listing.id,
+              date: eventDateObj,
+            },
+          },
+          update: {
+            status: "BOOKED",
+            bookingId: createdBooking.id,
+            note: `${values.eventCategory} · ${values.plannerName}`,
+          },
+          create: {
             listingId: listing.id,
             date: eventDateObj,
+            status: "BOOKED",
+            bookingId: createdBooking.id,
+            note: `${values.eventCategory} · ${values.plannerName}`,
           },
-        },
-        update: {
-          status: "BOOKED",
-          bookingId: createdBooking.id,
-          note: `${values.eventCategory} · ${values.plannerName}`,
-        },
-        create: {
-          listingId: listing.id,
-          date: eventDateObj,
-          status: "BOOKED",
-          bookingId: createdBooking.id,
-          note: `${values.eventCategory} · ${values.plannerName}`,
-        },
-      });
+        });
 
-      return {
-        createdBooking,
-        listing,
-        selectedPkgName: selectedPkg?.name || "Direct Owner Package",
-      };
-    });
+        return {
+          createdBooking,
+          listing,
+          selectedPkgName: selectedPkg?.name || "Direct Owner Package",
+        };
+      },
+      { maxWait: 10000, timeout: 20000 }
+    );
 
     // 7. Dispatch Resend transactional emails to Planner & Owner
     const dateStr = toIsoDateString(result.createdBooking.eventDate);
@@ -368,7 +389,7 @@ export async function updateBookingStatusAction(params: {
         bookingRecord,
         ownerName: existing.listing.owner.fullName,
       };
-    });
+    }, { maxWait: 10000, timeout: 20000 });
 
     await sendBookingStatusUpdateEmail({
       plannerEmail: updated.bookingRecord.planner.email,

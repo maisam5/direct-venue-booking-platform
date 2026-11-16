@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { SignUp } from "@clerk/nextjs";
 
 export default function SignUpPage() {
@@ -7,7 +8,9 @@ export default function SignUpPage() {
         <span className="label block">Clerk Authentication · Google OAuth</span>
         <h1 className="text-4xl mt-1">Create your MG—Events account</h1>
       </div>
-      <SignUp fallbackRedirectUrl="/account" />
+      <Suspense fallback={<div className="label">Loading sign-up...</div>}>
+        <SignUp fallbackRedirectUrl="/onboarding?role=PLANNER" />
+      </Suspense>
     </main>
   );
 }

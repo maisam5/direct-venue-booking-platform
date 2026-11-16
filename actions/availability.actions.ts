@@ -28,19 +28,47 @@ export async function getListingAvailabilityAction(
     dateFilter = { gte: start, lte: end };
   }
 
-  const slots = await prisma.availabilitySlot.findMany({
-    where: {
-      listingId,
-      ...(dateFilter ? { date: dateFilter } : {}),
-    },
-    orderBy: { date: "asc" },
-  });
+  const [slots, activeBookings] = await Promise.all([
+    prisma.availabilitySlot.findMany({
+      where: {
+        listingId,
+        ...(dateFilter ? { date: dateFilter } : {}),
+      },
+      orderBy: { date: "asc" },
+    }),
+    prisma.booking.findMany({
+      where: {
+        listingId,
+        status: { in: ["PENDING", "CONFIRMED"] },
+        ...(dateFilter ? { eventDate: dateFilter } : {}),
+      },
+      select: { eventDate: true, eventType: true },
+    }),
+  ]);
 
-  return slots.map((s) => ({
-    date: toIsoDateString(s.date),
-    status: s.status.toLowerCase() as "available" | "booked" | "blocked",
-    note: s.note ?? undefined,
-  }));
+  const mapByDate = new Map<string, AvailabilitySlot>();
+
+  for (const s of slots) {
+    const d = toIsoDateString(s.date);
+    mapByDate.set(d, {
+      date: d,
+      status: s.status.toLowerCase() as "available" | "booked" | "blocked",
+      note: s.note ?? undefined,
+    });
+  }
+
+  for (const b of activeBookings) {
+    const d = toIsoDateString(b.eventDate);
+    mapByDate.set(d, {
+      date: d,
+      status: "booked",
+      note: "Reserved by another user",
+    });
+  }
+
+  return Array.from(mapByDate.values()).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  );
 }
 
 export async function toggleDateAvailability(rawInput: {

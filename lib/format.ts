@@ -190,13 +190,13 @@ export function mapPrismaListingToUi(
       status: slot.status.toLowerCase() as "available" | "booked" | "blocked",
       note: slot.note ?? undefined,
     })),
-    galleryCaptions: finalGallery.slice(0, 3).map((_, idx) => ({
+    galleryCaptions: finalGallery.map((_, idx) => ({
       title:
         idx === 0
           ? `${record.title} · Primary View`
           : idx === 1
           ? `${record.city} · Event Space`
-          : "Service & Guest Arrival",
+          : `Venue View ${idx + 1}`,
       aspect: idx === 0 ? "4/5" : "16/10",
       note: record.amenities[idx] || record.address,
     })),

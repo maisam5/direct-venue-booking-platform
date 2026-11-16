@@ -1,15 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Listing, EventCategory } from "@/types";
-import {
-  bookingSchema,
-  BookingFormValues,
-} from "@/lib/validations/bookingSchema";
 import { useAppDispatch, useAppSelector } from "@/store";
 import {
   selectPackageTier,
@@ -19,9 +13,16 @@ import {
   toggleAddOn,
 } from "@/store/slices/bookingDraftSlice";
 import { createDirectBooking } from "@/actions/booking.actions";
+import { useListingAvailability } from "@/hooks/queries";
 import { formatCurrency } from "@/lib/format";
 import { PriceBreakdownCard } from "./PriceBreakdownCard";
 import { useClerkAuthFlow } from "@/hooks/useClerkAuthFlow";
+import {
+  executePendingBookingOnce,
+  peekPendingBooking,
+  savePendingBooking,
+} from "@/lib/pending-booking";
+import { toast } from "@/lib/toast";
 import { Lock } from "lucide-react";
 
 interface DirectBookingFormProps {
@@ -35,8 +36,58 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
   const draft = useAppSelector((state) => state.bookingDraft);
   const { user, isSignedIn, isLoaded, startGoogleAuth, authPending } =
     useClerkAuthFlow();
+
   const [submittedCode, setSubmittedCode] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [plannerName, setPlannerName] = useState("");
+  const [plannerPhone, setPlannerPhone] = useState("");
+  const [plannerEmail, setPlannerEmail] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const { data: liveSlots } = useListingAvailability(
+    listing.id,
+    "2026-12",
+    listing.availability
+  );
+  const effectiveSlots = liveSlots ?? listing.availability;
+
+  const unavailableDateMap = React.useMemo(() => {
+    const map = new Map<string, "booked" | "blocked">();
+    for (const s of effectiveSlots) {
+      if (s.status === "booked" || s.status === "blocked") {
+        map.set(s.date, s.status);
+      }
+    }
+    return map;
+  }, [effectiveSlots]);
+
+  const firstOpenDate = React.useMemo(() => {
+    for (let day = 14; day <= 31; day++) {
+      const candidate = `2026-12-${String(day).padStart(2, "0")}`;
+      if (!unavailableDateMap.has(candidate)) {
+        return candidate;
+      }
+    }
+    for (let day = 1; day <= 13; day++) {
+      const candidate = `2026-12-${String(day).padStart(2, "0")}`;
+      if (!unavailableDateMap.has(candidate)) {
+        return candidate;
+      }
+    }
+    return "2026-12-28";
+  }, [unavailableDateMap]);
+
+  // If the initial default date in Redux is already booked/blocked when slots load, auto-switch to firstOpenDate
+  const autoSwitchedListingRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (autoSwitchedListingRef.current === listing.id) return;
+    if (draft.eventDate && unavailableDateMap.has(draft.eventDate)) {
+      autoSwitchedListingRef.current = listing.id;
+      dispatch(setDraftEventDate(firstOpenDate));
+    }
+  }, [listing.id, draft.eventDate, unavailableDateMap, firstOpenDate, dispatch]);
 
   const activePackage =
     listing.packages.find((p) => p.id === draft.selectedPackageId) ??
@@ -44,60 +95,204 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
 
   const clerkName = user?.fullName || user?.firstName || "";
   const clerkEmail = user?.primaryEmailAddress?.emailAddress || "";
+  const clerkPhone = user?.primaryPhoneNumber?.phoneNumber || "";
 
-  const {
-    register,
-    handleSubmit,
-    setValue,
-    formState: { errors, isSubmitting },
-  } = useForm<BookingFormValues>({
-    resolver: zodResolver(bookingSchema),
-    values: {
+  // Pre-fill contact details from Clerk user when available
+  useEffect(() => {
+    if (clerkName) {
+      setPlannerName((prev) => prev || clerkName);
+    }
+    if (clerkEmail) {
+      setPlannerEmail((prev) => prev || clerkEmail);
+    }
+    if (clerkPhone) {
+      setPlannerPhone((prev) => prev || clerkPhone);
+    }
+  }, [clerkName, clerkEmail, clerkPhone]);
+
+  // Check if redirected back with ?booked=CODE
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const bookedParam = params.get("booked");
+    if (bookedParam) {
+      setSubmittedCode(bookedParam);
+    }
+  }, []);
+
+  // If user just signed in and landed back on this form with a pending booking
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    if (!peekPendingBooking()) return;
+
+    async function completeSavedBooking() {
+      setIsSubmitting(true);
+      setServerError(null);
+      try {
+        const res = await executePendingBookingOnce({
+          fullName: user?.fullName,
+          firstName: user?.firstName,
+          email: user?.primaryEmailAddress?.emailAddress,
+          phone: user?.primaryPhoneNumber?.phoneNumber,
+        });
+
+        if (!res.executed) return;
+
+        if (!res.success || !res.booking) {
+          const msg =
+            res.error || "Could not complete booking for the selected date.";
+          setServerError(msg);
+          toast(msg);
+          return;
+        }
+
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ["availability", listing.id],
+          }),
+          queryClient.invalidateQueries({ queryKey: ["bookings"] }),
+          queryClient.invalidateQueries({ queryKey: ["listings"] }),
+        ]);
+
+        const code = res.booking.bookingCode || res.booking.id;
+        toast(`Booking confirmed! Ref #${code}`);
+        setSubmittedCode(code);
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+
+    completeSavedBooking();
+  }, [isLoaded, isSignedIn, user, listing.id, queryClient]);
+
+  const resolvedCategory: Exclude<EventCategory, "all"> =
+    draft.eventCategory || listing.categories[0] || "Wedding";
+  const resolvedDate = draft.eventDate || firstOpenDate;
+  const selectedDateConflict = unavailableDateMap.get(resolvedDate);
+  const resolvedGuestCount = Math.max(
+    1,
+    Math.min(draft.guestCount || 50, listing.maxGuests || 500)
+  );
+
+  const handleSignInAndBook = async () => {
+    setServerError(null);
+    if (!resolvedDate) {
+      const msg = "Please choose an event date before booking.";
+      setServerError(msg);
+      toast(msg);
+      return;
+    }
+
+    if (selectedDateConflict) {
+      const msg = `Date ${resolvedDate} is already ${selectedDateConflict}. Please select an available date.`;
+      setServerError(msg);
+      toast(msg);
+      return;
+    }
+
+    savePendingBooking({
       listingId: listing.id,
-      packageId: activePackage?.id ?? "",
-      eventCategory: draft.eventCategory,
-      eventDate: draft.eventDate,
-      guestCount: Math.min(draft.guestCount, listing.maxGuests),
-      plannerName: clerkName,
-      plannerEmail: clerkEmail,
-      plannerPhone: user?.primaryPhoneNumber?.phoneNumber || "",
+      listingSlug: listing.slug,
+      listingName: listing.name,
+      ownerName: listing.ownerName,
+      packageId: activePackage?.id || "",
+      eventCategory: resolvedCategory,
+      eventDate: resolvedDate,
+      guestCount: resolvedGuestCount,
+      plannerName: plannerName.trim(),
+      plannerEmail: plannerEmail.trim(),
+      plannerPhone: plannerPhone.trim(),
       selectedAddOnIds: draft.selectedAddOnIds,
-      notes: "",
-    },
-  });
+      notes: notes.trim(),
+      calculatedTotal: draft.calculatedTotal,
+      createdAt: Date.now(),
+    });
 
-  const onSubmit = async (values: BookingFormValues) => {
+    await startGoogleAuth("PLANNER", `/listings/${listing.slug}`);
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setServerError(null);
 
     if (!isSignedIn) {
-      setServerError("Please sign in with Google before sending a booking request.");
+      await handleSignInAndBook();
       return;
     }
 
-    const response = await createDirectBooking({
-      ...values,
-      calculatedTotal: draft.calculatedTotal,
-    });
+    const finalName = (plannerName.trim() || clerkName || "Verified Planner").trim();
+    const finalEmail = (plannerEmail.trim() || clerkEmail).trim();
+    const finalPhone = (
+      plannerPhone.trim() ||
+      clerkPhone ||
+      "+92 300 0000000"
+    ).trim();
 
-    if (!response.success || !response.booking) {
-      setServerError(
-        response.error || "This date was just reserved or blocked by the owner"
-      );
+    if (!resolvedDate) {
+      const msg = "Please select an event date.";
+      setServerError(msg);
+      toast(msg);
       return;
     }
 
-    // Invalidate real-time availability, bookings, and listings queries in TanStack Query
-    await Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: ["availability", listing.id],
-      }),
-      queryClient.invalidateQueries({ queryKey: ["bookings"] }),
-      queryClient.invalidateQueries({ queryKey: ["listings"] }),
-    ]);
+    if (selectedDateConflict) {
+      const msg = `Date ${resolvedDate} is already ${selectedDateConflict}. Please choose an open date.`;
+      setServerError(msg);
+      toast(msg);
+      return;
+    }
 
-    setSubmittedCode(
-      response.booking.bookingCode || response.booking.id
-    );
+    if (!finalEmail || !/^\S+@\S+\.\S+$/.test(finalEmail)) {
+      const msg = "Please enter a valid email address.";
+      setServerError(msg);
+      toast(msg);
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const response = await createDirectBooking({
+        listingId: listing.id,
+        packageId: activePackage?.id || "",
+        eventCategory: resolvedCategory,
+        eventDate: resolvedDate,
+        guestCount: resolvedGuestCount,
+        plannerName: finalName,
+        plannerEmail: finalEmail,
+        plannerPhone: finalPhone,
+        selectedAddOnIds: draft.selectedAddOnIds,
+        notes: notes.trim(),
+        calculatedTotal: draft.calculatedTotal,
+      });
+
+      if (!response.success || !response.booking) {
+        const msg =
+          response.error ||
+          "Unable to complete booking. Please try another date.";
+        setServerError(msg);
+        toast(msg);
+        return;
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["availability", listing.id],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["bookings"] }),
+        queryClient.invalidateQueries({ queryKey: ["listings"] }),
+      ]);
+
+      const code = response.booking.bookingCode || response.booking.id;
+      toast(`Booking confirmed! Ref #${code}`);
+      setSubmittedCode(code);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to submit booking.";
+      setServerError(msg);
+      toast(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (submittedCode) {
@@ -110,7 +305,7 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
           Sent straight to {listing.ownerName}.
         </h3>
         <p className="text-sm text-[var(--muted)]">
-          Your date ({draft.eventDate}) is now locked on the PostgreSQL live
+          Your date ({resolvedDate}) is now locked on the PostgreSQL live
           calendar while {listing.ownerName} reviews your terms. Confirmation
           and lead alert emails have been dispatched via Resend.
         </p>
@@ -136,7 +331,7 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
 
   return (
     <form
-      onSubmit={handleSubmit(onSubmit)}
+      onSubmit={handleFormSubmit}
       className="border border-[var(--ink)] bg-[var(--bg)] p-6 space-y-6"
       noValidate
     >
@@ -177,11 +372,8 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
               <button
                 key={pkg.id}
                 type="button"
-                onClick={() => {
-                  dispatch(selectPackageTier(pkg.id));
-                  setValue("packageId", pkg.id);
-                }}
-                className={`w-full text-left p-3.5 border transition-colors ${
+                onClick={() => dispatch(selectPackageTier(pkg.id))}
+                className={`w-full text-left p-3.5 border transition-colors cursor-pointer ${
                   isSelected
                     ? "border-[var(--ink)] bg-[var(--soft)]"
                     : "border-[var(--line)] bg-[var(--bg)] hover:bg-[var(--soft)]"
@@ -212,11 +404,10 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
           <select
             id="bk-category"
             className="w-full mt-1 bg-transparent text-sm outline-none"
-            value={draft.eventCategory}
+            value={resolvedCategory}
             onChange={(e) => {
               const val = e.target.value as Exclude<EventCategory, "all">;
               dispatch(setDraftEventCategory(val));
-              setValue("eventCategory", val);
             }}
           >
             {listing.categories.map((cat) => (
@@ -227,24 +418,40 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
           </select>
         </div>
 
-        <div className="border border-[var(--line)] p-3">
-          <label className="label block" htmlFor="bk-date">
-            Date
-          </label>
+        <div
+          className={`border p-3 ${
+            selectedDateConflict
+              ? "border-red-600 bg-red-500/10"
+              : "border-[var(--line)]"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-1">
+            <label className="label block" htmlFor="bk-date">
+              Date
+            </label>
+            <span
+              className={`text-[10px] font-semibold uppercase tracking-wider ${
+                selectedDateConflict ? "text-red-600" : "text-emerald-600"
+              }`}
+            >
+              {selectedDateConflict ? "Booked" : "Open"}
+            </span>
+          </div>
           <input
             id="bk-date"
             type="date"
             className="w-full mt-1 bg-transparent text-sm outline-none"
-            value={draft.eventDate}
-            onChange={(e) => {
-              dispatch(setDraftEventDate(e.target.value));
-              setValue("eventDate", e.target.value);
-            }}
+            value={resolvedDate}
+            onChange={(e) => dispatch(setDraftEventDate(e.target.value))}
           />
-          {errors.eventDate && (
-            <span className="text-[11px] text-red-600 block mt-1">
-              {errors.eventDate.message}
-            </span>
+          {selectedDateConflict && (
+            <button
+              type="button"
+              onClick={() => dispatch(setDraftEventDate(firstOpenDate))}
+              className="mt-1 text-[11px] text-red-600 underline text-left block cursor-pointer"
+            >
+              Already booked · Use {firstOpenDate}
+            </button>
           )}
         </div>
 
@@ -255,17 +462,16 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
           <input
             id="bk-guests"
             type="number"
-            min={10}
+            min={1}
             max={listing.maxGuests}
             className="w-full mt-1 bg-transparent text-sm outline-none"
-            value={draft.guestCount}
+            value={resolvedGuestCount}
             onChange={(e) => {
               const count = Math.max(
-                10,
-                Math.min(listing.maxGuests, Number(e.target.value) || 10)
+                1,
+                Math.min(listing.maxGuests || 500, Number(e.target.value) || 1)
               );
               dispatch(setDraftGuestCount(count));
-              setValue("guestCount", count);
             }}
           />
         </div>
@@ -326,14 +532,10 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
               id="plannerName"
               type="text"
               placeholder="Your full name"
-              {...register("plannerName")}
+              value={plannerName}
+              onChange={(e) => setPlannerName(e.target.value)}
               className="w-full mt-1 bg-transparent text-sm outline-none"
             />
-            {errors.plannerName && (
-              <span className="text-[11px] text-red-600 block mt-1">
-                {errors.plannerName.message}
-              </span>
-            )}
           </div>
           <div className="border border-[var(--line)] p-3">
             <label className="label block" htmlFor="plannerPhone">
@@ -342,15 +544,11 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
             <input
               id="plannerPhone"
               type="tel"
-              placeholder="+1 (555) 234-5678"
-              {...register("plannerPhone")}
+              placeholder="+92 300 1234567"
+              value={plannerPhone}
+              onChange={(e) => setPlannerPhone(e.target.value)}
               className="w-full mt-1 bg-transparent text-sm outline-none"
             />
-            {errors.plannerPhone && (
-              <span className="text-[11px] text-red-600 block mt-1">
-                {errors.plannerPhone.message}
-              </span>
-            )}
           </div>
         </div>
 
@@ -362,14 +560,10 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
             id="plannerEmail"
             type="email"
             placeholder="you@example.com"
-            {...register("plannerEmail")}
+            value={plannerEmail}
+            onChange={(e) => setPlannerEmail(e.target.value)}
             className="w-full mt-1 bg-transparent text-sm outline-none"
           />
-          {errors.plannerEmail && (
-            <span className="text-[11px] text-red-600 block mt-1">
-              {errors.plannerEmail.message}
-            </span>
-          )}
         </div>
 
         <div className="border border-[var(--line)] p-3">
@@ -380,13 +574,14 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
             id="notes"
             rows={2}
             placeholder="Share arrival time, catering plans, or questions for the owner..."
-            {...register("notes")}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
             className="w-full mt-1 bg-transparent text-sm outline-none resize-none"
           />
         </div>
       </div>
 
-      {/* Price Breakdown explicitly showing $0 Broker Fee */}
+      {/* Price Breakdown */}
       <PriceBreakdownCard
         packageLabel={activePackage?.name ?? "Base Rental"}
         venueSubtotal={draft.venueSubtotal}
@@ -401,28 +596,22 @@ export function DirectBookingForm({ listing }: DirectBookingFormProps) {
             <Lock size={16} className="mt-0.5 shrink-0 text-[var(--ink)]" />
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-[var(--ink)]">
-                Sign in required to book
+                Sign in &amp; instant booking
               </p>
               <p className="text-xs text-[var(--muted)] mt-0.5">
-                Log in with Google to lock your date on the live calendar and
-                message {listing.ownerName} directly.
+                Sign in with Google and your booking for {listing.name} will be
+                confirmed automatically.
               </p>
             </div>
           </div>
           <button
-            type="button"
-            disabled={authPending !== null}
-            onClick={() =>
-              startGoogleAuth(
-                "PLANNER",
-                typeof window !== "undefined" ? window.location.pathname : `/listings/${listing.slug}`
-              )
-            }
+            type="submit"
+            disabled={authPending !== null || isSubmitting}
             className="btn btn-filled w-full !py-3 text-sm"
           >
-            {authPending === "PLANNER"
-              ? "Redirecting to Google..."
-              : `Continue with Google to Book ${listing.name}`}
+            {authPending === "PLANNER" || isSubmitting
+              ? "Signing in & saving your booking..."
+              : `Sign in with Google & Book ${listing.name}`}
           </button>
         </div>
       ) : (

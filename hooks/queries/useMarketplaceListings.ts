@@ -23,8 +23,8 @@ export function useMarketplaceListings(
     ],
     queryFn: () => getMarketplaceListingsAction(filters),
     initialData,
-    staleTime: 15_000,
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -33,7 +33,7 @@ export function useMyListings(enabled: boolean = true) {
     queryKey: ["my-listings"],
     queryFn: () => getMyListingsAction(),
     enabled,
-    staleTime: 15_000,
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }

@@ -7,13 +7,17 @@ import {
 } from "@/actions/booking.actions";
 import { BookingRequest } from "@/types";
 
-export function useBookings(initialData?: BookingRequest[]) {
+export function useBookings(
+  initialData?: BookingRequest[],
+  enabled: boolean = true
+) {
   return useQuery({
     queryKey: ["bookings"],
     queryFn: () => getBookingsAction(),
+    enabled,
     initialData,
-    staleTime: 15_000,
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 

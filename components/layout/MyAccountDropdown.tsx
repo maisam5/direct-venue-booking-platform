@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
+import { useQueryClient } from "@tanstack/react-query";
 import { useClerkAuthFlow } from "@/hooks/useClerkAuthFlow";
 import { useBookings } from "@/hooks/queries";
 import { useCreateListingModal } from "@/store/useCreateListingModal";
@@ -50,14 +51,19 @@ export function MyAccountDropdown() {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const queryClient = useQueryClient();
   const { signOut } = useClerk();
   const { user, isSignedIn, isLoaded, currentRole, authPending, startGoogleAuth } =
     useClerkAuthFlow();
-  const { data: bookings = [] } = useBookings();
+  const isHost = isSignedIn && isHostRole(currentRole);
+  const { data: bookings = [] } = useBookings(
+    undefined,
+    Boolean(isLoaded && isSignedIn),
+    isHost ? "owner" : "planner"
+  );
   const { open: openCreateListing } = useCreateListingModal();
   const { open: openFilter } = useFilterModal();
 
-  const isHost = isSignedIn && isHostRole(currentRole);
   const pendingRequests = bookings.filter((b) => b.dbStatus === "PENDING");
   const pendingRequestsCount = pendingRequests.length;
   const totalRequestsCount = bookings.length;
@@ -77,6 +83,7 @@ export function MyAccountDropdown() {
 
   const handleSignOut = async () => {
     setOpen(false);
+    queryClient.clear();
     await signOut({ redirectUrl: "/" });
     toast("Signed out successfully");
   };

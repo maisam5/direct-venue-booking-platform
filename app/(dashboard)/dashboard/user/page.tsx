@@ -18,11 +18,15 @@ import { useClerkAuthFlow } from "@/hooks/useClerkAuthFlow";
 function UserPlannerContent() {
   const dispatch = useAppDispatch();
   const { savedSlugs } = useAppSelector((state) => state.bookingDraft);
-  const { data: submittedBookings = [] } = useBookings();
-  const { data: listings = [] } = useMarketplaceListings();
-  const statusMutation = useUpdateBookingStatusMutation();
   const { user, isLoaded, isSignedIn, startGoogleAuth, authPending } =
     useClerkAuthFlow();
+  const { data: submittedBookings = [] } = useBookings(
+    undefined,
+    Boolean(isLoaded && isSignedIn),
+    "planner"
+  );
+  const { data: listings = [] } = useMarketplaceListings();
+  const statusMutation = useUpdateBookingStatusMutation();
   const displayName = user?.fullName || user?.firstName || "Event Planner";
 
   if (isLoaded && !isSignedIn) {

@@ -15,12 +15,16 @@ import { useClerkAuthFlow } from "@/hooks/useClerkAuthFlow";
 import { isHostRole } from "@/lib/roles";
 
 function OwnerPortalContent() {
-  const { data: submittedBookings = [] } = useBookings();
+  const { isLoaded, isSignedIn, currentRole, startGoogleAuth, authPending } =
+    useClerkAuthFlow();
+  const { data: submittedBookings = [] } = useBookings(
+    undefined,
+    Boolean(isLoaded && isSignedIn && isHostRole(currentRole)),
+    "owner"
+  );
   const { data: listings = [] } = useMarketplaceListings();
   const statusMutation = useUpdateBookingStatusMutation();
   const { open: openCreateListing } = useCreateListingModal();
-  const { isLoaded, isSignedIn, currentRole, startGoogleAuth, authPending } =
-    useClerkAuthFlow();
 
   if (isLoaded && !isSignedIn) {
     return (

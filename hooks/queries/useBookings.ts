@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useUser } from "@clerk/nextjs";
 import {
   getBookingsAction,
   updateBookingStatusAction,
@@ -9,12 +10,16 @@ import { BookingRequest } from "@/types";
 
 export function useBookings(
   initialData?: BookingRequest[],
-  enabled: boolean = true
+  enabled: boolean = true,
+  scope?: "owner" | "planner"
 ) {
+  const { user, isLoaded, isSignedIn } = useUser();
+  const userId = user?.id ?? "anonymous";
+
   return useQuery({
-    queryKey: ["bookings"],
-    queryFn: () => getBookingsAction(),
-    enabled,
+    queryKey: ["bookings", userId, scope ?? "auto"],
+    queryFn: () => getBookingsAction(scope),
+    enabled: Boolean(enabled && isLoaded && isSignedIn && user?.id),
     initialData,
     staleTime: 60_000,
     refetchOnWindowFocus: false,

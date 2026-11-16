@@ -15,22 +15,20 @@ import { BookingRequest } from "@/types";
 import { AuthError, getSession, requireUser, errorMessage } from "@/lib/auth";
 import { isHostRole } from "@/lib/roles";
 
-export async function getBookingsAction(): Promise<BookingRequest[]> {
+export async function getBookingsAction(
+  scope?: "owner" | "planner"
+): Promise<BookingRequest[]> {
   const session = await getSession();
   if (!session) {
     return [];
   }
 
+  const effectiveScope =
+    scope ?? (isHostRole(session.role) ? "owner" : "planner");
+
   const whereClause =
-    session.role === "ADMIN"
-      ? undefined
-      : isHostRole(session.role)
-      ? {
-          OR: [
-            { listing: { ownerId: session.dbUserId } },
-            { plannerId: session.dbUserId },
-          ],
-        }
+    effectiveScope === "owner"
+      ? { listing: { ownerId: session.dbUserId } }
       : { plannerId: session.dbUserId };
 
   const records = await prisma.booking.findMany({

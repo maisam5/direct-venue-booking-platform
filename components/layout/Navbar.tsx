@@ -29,7 +29,8 @@ export function Navbar() {
   const [mounted, setMounted] = useState(false);
   const { data: bookings = [] } = useBookings(
     undefined,
-    Boolean(mounted && isSignedIn && !isHostRole(currentRole))
+    Boolean(mounted && isSignedIn && !isHostRole(currentRole)),
+    "planner"
   );
 
   useEffect(() => {
